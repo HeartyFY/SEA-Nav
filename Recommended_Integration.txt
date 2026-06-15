@@ -1,0 +1,110 @@
+Recommended Integration for SEA-Nav PPO in Isaac Lab 2.2.0 / Isaac Sim 5.0.0
+
+Your SEA-Nav training/rsl_rl stack is not directly plug-compatible with Isaac Lab 2.2's
+RslRlVecEnvWrapper. It is an older Legged-Gym-style PPO stack. The clean path is to keep
+your PPO code and add a thin Isaac Lab adapter.
+
+Key mismatch
+
+Your runner expects an env with fields/methods like:
+
+env.num_obs
+env.rays
+env.num_nav_actions
+env.num_props
+env.cfg.env.his_len
+env.get_observations()
+env.get_privileged_observations()
+env.get_extras()
+env.step(actions) -> obs, privileged_obs, rewards, dones, infos
+
+Isaac Lab 2.2 normally exposes:
+
+env = gym.make(task_name, cfg=env_cfg)
+env = RslRlVecEnvWrapper(env)
+env.get_observations() -> obs, extras
+env.step(actions) -> obs, rewards, dones, infos
+
+Recommended integration steps
+
+1. Use Isaac Lab 2.2.0 with Isaac Sim 5.0.0 and Python 3.11.
+2. Install your PPO package into the Isaac Lab Python environment.
+3. Register your task with Gymnasium using env_cfg_entry_point and rsl_rl_cfg_entry_point.
+4. Create an Isaac Lab launch script that starts Isaac Sim first, then builds the env.
+5. Add a small adapter between Isaac Lab and your runner.
+6. Train with your existing OnPolicyRunner.
+
+Minimal adapter sketch
+
+class IsaacLabToSeaNavAdapter:
+    def __init__(self, env):
+        self.env = env
+        self.unwrapped = env.unwrapped
+        self.device = env.unwrapped.device
+        self.num_envs = env.num_envs
+        self.num_actions = env.num_actions
+        self.max_episode_length = env.max_episode_length
+        self.episode_length_buf = env.episode_length_buf
+
+        obs, extras = env.get_observations()
+        self.num_obs = obs.shape[1]
+        self.num_privileged_obs = extras["observations"].get("critic", obs).shape[1]
+
+        self.rays = self.unwrapped.rays
+        self.num_nav_actions = self.num_actions
+        self.num_props = self.unwrapped.num_props
+        self.cfg = self.unwrapped.cfg
+
+    def get_observations(self):
+        obs, _ = self.env.get_observations()
+        return obs
+
+    def get_privileged_observations(self):
+        obs, extras = self.env.get_observations()
+        return extras["observations"].get("critic", obs)
+
+    def get_extras(self):
+        _, extras = self.env.get_observations()
+        return extras
+
+    def reset(self):
+        obs, extras = self.env.reset()
+        return obs, extras
+
+    def step(self, actions):
+        obs, rewards, dones, infos = self.env.step(actions)
+        privileged_obs = infos["observations"].get("critic", obs)
+        return obs, privileged_obs, rewards, dones, infos
+
+Practical launch pattern
+
+import gymnasium as gym
+import your_task_package.tasks
+from isaaclab.app import AppLauncher
+from isaaclab_tasks.utils import parse_env_cfg
+from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
+from rsl_rl.runners import OnPolicyRunner
+
+env_cfg = parse_env_cfg("Your-Task-Name", device=args_cli.device, num_envs=args_cli.num_envs)
+env = gym.make("Your-Task-Name", cfg=env_cfg)
+env = RslRlVecEnvWrapper(env)
+sea_env = IsaacLabToSeaNavAdapter(env)
+
+runner = OnPolicyRunner(
+    sea_env,
+    train_cfg,
+    log_dir="logs/sea_nav",
+    args=args_cli,
+    device=args_cli.device,
+)
+runner.learn(num_learning_iterations=10000)
+
+Important
+
+Do not use Isaac Lab's stock RSL-RL train script unchanged with this folder.
+Your PPO runner depends on custom assumptions: rays, num_props, num_nav_actions,
+CBF actor-critic modules, and a different rollout interface.
+
+The fastest practical route is to keep your SEA-Nav PPO unchanged, write one Isaac
+Lab training script plus the adapter, and make your task expose rays, num_props,
+and cfg.env.his_len.

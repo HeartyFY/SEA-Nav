@@ -1,0 +1,207 @@
+SEA-Nav Go2 Obstacle Training Changes
+=====================================
+
+Date: 2026-06-11
+
+Purpose
+-------
+The Go2 navigation task was upgraded from flat-plane goal navigation to an
+obstacle-aware navigation environment with both static and dynamic obstacles.
+
+The implementation is designed for scalable RL training with many parallel
+environments. Obstacles are represented analytically in tensors for training
+performance, and optional debug markers are available for small GUI runs.
+
+
+Files Changed
+-------------
+1. IsaacLab/source/isaaclab_tasks/isaaclab_tasks/direct/go2_nav/go2_nav_env_cfg.py
+
+   Added obstacle and ray configuration:
+   - ray_fov_deg
+   - num_static_obstacles
+   - num_dynamic_obstacles
+   - obstacle_spawn_radius
+   - obstacle_robot_clearance
+   - obstacle_goal_clearance
+   - static_obstacle_radius_range
+   - dynamic_obstacle_radius_range
+   - dynamic_obstacle_speed_range
+   - robot_collision_radius
+   - obstacle_clearance
+   - obstacle_clearance_reward_scale
+   - collision_penalty
+   - obstacle_debug_vis
+
+
+2. IsaacLab/source/isaaclab_tasks/isaaclab_tasks/direct/go2_nav/go2_nav_env.py
+
+   Added core obstacle logic:
+   - Static obstacle position/radius tensors.
+   - Dynamic obstacle position/radius/velocity tensors.
+   - Per-reset obstacle sampling around each environment origin.
+   - Goal and robot clearance checks during obstacle sampling.
+   - Dynamic obstacle motion with boundary bounce.
+   - Analytic 2D ray intersection against circular obstacles.
+   - Existing 41 ray observations now contain obstacle distances.
+   - Collision detection against inflated obstacle radius.
+   - Obstacle collision termination.
+   - Clearance penalty and collision penalty in reward.
+   - Optional debug markers:
+     - Static obstacles: blue
+     - Dynamic obstacles: red
+
+   Important note:
+   The obstacles are analytic training obstacles, not full PhysX rigid bodies.
+   This is intentional so training remains fast with 1024 parallel envs.
+
+
+3. scripts/train_sea_nav_isaaclab.py
+
+   Added CLI overrides:
+   - --num_static_obstacles
+   - --num_dynamic_obstacles
+   - --obstacle_spawn_radius
+
+
+4. scripts/smoke_go2_nav.py
+
+   Added the same obstacle CLI overrides for quick validation:
+   - --num_static_obstacles
+   - --num_dynamic_obstacles
+   - --obstacle_spawn_radius
+
+
+5. scripts/play_sea_nav_isaaclab.py
+
+   Added playback/recording support earlier and extended it with obstacle
+   controls:
+   - --num_static_obstacles
+   - --num_dynamic_obstacles
+   - --obstacle_spawn_radius
+   - --obstacle_debug_vis
+
+   The play script loads SEA-Nav checkpoints and runs deterministic inference.
+
+
+How The New Environment Works
+-----------------------------
+The high-level navigation policy still outputs 3 actions:
+- vx command
+- vy command
+- yaw-rate command
+
+The frozen low-level locomotion policy converts these high-level commands into
+12 joint actions.
+
+Obstacle perception uses the existing ray observation channel:
+- 41 rays
+- 180 degree forward field of view
+- robot-yaw frame
+- min distance: cfg.min_ray_distance
+- max distance: cfg.max_ray_distance
+
+Each ray reports the nearest analytic obstacle distance. These ray distances are
+also compatible with the existing CBF safety layer, which assumes 41 rays over a
+180 degree field of view.
+
+
+Reward / Termination Changes
+----------------------------
+The original reward terms remain:
+- alive reward
+- progress reward
+- goal reward
+- heading reward
+- action-rate penalty
+- joint-velocity penalty
+- termination penalty
+
+Added:
+- obstacle clearance penalty
+- collision penalty
+
+Added termination:
+- obstacle collision
+
+
+Validation Performed
+--------------------
+Compiled changed Python files:
+
+python3 -m py_compile \
+  /home/hfy/SEA-Nav/scripts/train_sea_nav_isaaclab.py \
+  /home/hfy/SEA-Nav/scripts/smoke_go2_nav.py \
+  /home/hfy/SEA-Nav/scripts/play_sea_nav_isaaclab.py \
+  /home/hfy/SEA-Nav/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/direct/go2_nav/go2_nav_env.py \
+  /home/hfy/SEA-Nav/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/direct/go2_nav/go2_nav_env_cfg.py
+
+Ran GPU smoke test successfully:
+
+/home/hfy/SEA-Nav/IsaacLab/isaaclab.sh -p /home/hfy/SEA-Nav/scripts/smoke_go2_nav.py \
+  --task Isaac-Go2-Nav-Direct-v0 \
+  --num_envs 2 \
+  --steps 4 \
+  --headless \
+  --num_static_obstacles 2 \
+  --num_dynamic_obstacles 1
+
+
+Recommended Training Curriculum
+-------------------------------
+Stage 1: static obstacles only
+
+/home/hfy/SEA-Nav/IsaacLab/isaaclab.sh -p /home/hfy/SEA-Nav/scripts/train_sea_nav_isaaclab.py \
+  --task Isaac-Go2-Nav-Direct-v0 \
+  --num_envs 1024 \
+  --max_iterations 1000 \
+  --headless \
+  --num_static_obstacles 4 \
+  --num_dynamic_obstacles 0
+
+
+Stage 2: add dynamic obstacles
+
+/home/hfy/SEA-Nav/IsaacLab/isaaclab.sh -p /home/hfy/SEA-Nav/scripts/train_sea_nav_isaaclab.py \
+  --task Isaac-Go2-Nav-Direct-v0 \
+  --num_envs 1024 \
+  --max_iterations 2000 \
+  --headless \
+  --num_static_obstacles 6 \
+  --num_dynamic_obstacles 3
+
+
+Visual Debugging
+----------------
+Use only a small number of environments for GUI debugging.
+
+/home/hfy/SEA-Nav/IsaacLab/isaaclab.sh -p /home/hfy/SEA-Nav/scripts/play_sea_nav_isaaclab.py \
+  --task Isaac-Go2-Nav-Direct-v0 \
+  --num_envs 1 \
+  --steps 0 \
+  --real_time \
+  --rendering_mode performance \
+  --num_static_obstacles 6 \
+  --num_dynamic_obstacles 3 \
+  --obstacle_debug_vis
+
+
+Operational Notes
+-----------------
+1. Train with --headless for 1024 environments.
+2. Do not use GUI training with 1024 environments on an 8 GB GPU.
+3. Use GUI only for 1 to 8 environments.
+4. Video recording still relies on Isaac Sim RTX rendering and may hit the
+   existing librtx.scenedb crash on this machine.
+5. If recording crashes, use GUI playback with --num_envs 1 and record the
+   Isaac Sim window with an external screen recorder.
+
+
+Future Improvements
+-------------------
+1. Add true PhysX rigid obstacle bodies for small-env validation.
+2. Add obstacle curriculum scheduling inside the training loop.
+3. Add TensorBoard metrics for collision rate, success rate, and min clearance.
+4. Add separate evaluation script for success/fall/collision statistics.
+5. Add obstacle layout presets for static-only, dynamic-only, sparse, and dense
+   training.
