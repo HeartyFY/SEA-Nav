@@ -115,8 +115,15 @@ class Go2NavEnv(DirectRLEnv):
         alpha = self.cfg.command_filter_alpha
         self._filtered_commands = alpha * self._nav_actions + (1.0 - alpha) * self._filtered_commands
         self._filtered_commands = torch.max(torch.min(self._filtered_commands, self._command_upper), self._command_lower)
+        if self.cfg.debug_hold_default_pose:
+            self._low_level_actions.zero_()
+            self._processed_actions = self._robot.data.default_joint_pos
+            return
         self._low_level_actions = self._compute_low_level_actions(self._filtered_commands).clamp(-100.0, 100.0)
-        self._processed_actions = self.cfg.action_scale * self._reindex(self._low_level_actions) + self._robot.data.default_joint_pos
+        self._processed_actions = (
+            self.cfg.action_scale * self._maybe_reindex_actions(self._low_level_actions)
+            + self._robot.data.default_joint_pos
+        )
 
     def _apply_action(self) -> None:
         self._robot.set_joint_position_target(self._processed_actions)
@@ -131,9 +138,9 @@ class Go2NavEnv(DirectRLEnv):
                 self._robot.data.root_ang_vel_b * self.cfg.ang_vel_obs_scale,
                 self._robot.data.projected_gravity_b,
                 commands * scale,
-                self._reindex(self._robot.data.joint_pos - self._robot.data.default_joint_pos)
+                self._maybe_reindex_observations(self._robot.data.joint_pos - self._robot.data.default_joint_pos)
                 * self.cfg.dof_pos_obs_scale,
-                self._reindex(self._robot.data.joint_vel) * self.cfg.dof_vel_obs_scale,
+                self._maybe_reindex_observations(self._robot.data.joint_vel) * self.cfg.dof_vel_obs_scale,
                 self._previous_low_level_actions,
             ),
             dim=-1,
@@ -504,6 +511,16 @@ class Go2NavEnv(DirectRLEnv):
     @staticmethod
     def _reindex(tensor: torch.Tensor) -> torch.Tensor:
         return tensor[:, [3, 4, 5, 0, 1, 2, 9, 10, 11, 6, 7, 8]]
+
+    def _maybe_reindex_observations(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.cfg.debug_reindex_loco_observations:
+            return self._reindex(tensor)
+        return tensor
+
+    def _maybe_reindex_actions(self, tensor: torch.Tensor) -> torch.Tensor:
+        if self.cfg.debug_reindex_loco_actions:
+            return self._reindex(tensor)
+        return tensor
 
     def _update_history(self, history: torch.Tensor, current: torch.Tensor) -> torch.Tensor:
         reset_mask = (self.episode_length_buf <= 1).view(self.num_envs, 1, 1)

@@ -98,8 +98,10 @@ def check_go2_asset_and_spaces() -> None:
     for label, pattern in required_cfg_patterns.items():
         if re.search(pattern, cfg_text) is None:
             raise RuntimeError(f"Missing expected config invariant: {label}")
-    if "self._reindex(self._low_level_actions)" not in env_text:
-        raise RuntimeError("Low-level policy actions must be reindexed before joint targets")
+    if "self._maybe_reindex_actions(self._low_level_actions)" not in env_text:
+        raise RuntimeError("Low-level policy actions must pass through the configurable joint-order mapping")
+    if "self._maybe_reindex_observations(self._robot.data.joint_pos" not in env_text:
+        raise RuntimeError("Low-level policy observations must pass through the configurable joint-order mapping")
     if "self._update_history" not in env_text:
         raise RuntimeError("History buffers must use reset-aware update logic")
 

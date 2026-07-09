@@ -8,7 +8,7 @@ from typing import Any
 
 _DEFAULT_TRAIN_CFG: dict[str, dict[str, Any]] = {
     "policy": {
-        "init_noise_std": 1.5,
+        "init_noise_std": 0.6,
         "actor_hidden_dims": [512, 256, 128],
         "critic_hidden_dims": [512, 256, 128],
         "activation": "elu",
@@ -20,7 +20,7 @@ _DEFAULT_TRAIN_CFG: dict[str, dict[str, Any]] = {
         "entropy_coef": 0.003,
         "num_learning_epochs": 5,
         "num_mini_batches": 4,
-        "learning_rate": 1.0e-3,
+        "learning_rate": 5.0e-4,
         "schedule": "adaptive",
         "gamma": 0.99,
         "lam": 0.95,

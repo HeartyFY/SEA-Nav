@@ -1,0 +1,235 @@
+SEA-Nav Training, Playback, Video, and ONNX Export Guide
+=========================================================
+
+Project root:
+
+  cd /home/hfy/SEA-Nav
+
+
+1. View training results in TensorBoard
+---------------------------------------
+
+Start TensorBoard:
+
+  tensorboard --logdir logs/sea_nav --port 6006
+
+Open in browser:
+
+  http://localhost:6006
+
+Useful metrics to watch:
+
+  Train/mean_reward
+  Train/mean_episode_length
+  Train/mean_std
+  Metrics/current_fall_tip_rate
+  Metrics/current_success_rate
+  Metrics/current_collision_rate
+  Reward_Terms/progress
+  Reward_Terms/termination
+
+
+2. Recommended stable training command
+--------------------------------------
+
+Start from scratch after the low-level action scale fix. Do not resume old
+checkpoints trained with action_scale = 0.25.
+
+Stage 1: no obstacles
+
+  python3 scripts/train_sea_nav_isaaclab.py \
+    --num_envs 1024 \
+    --max_iterations 800 \
+    --run_name stable_no_obstacles \
+    --action_scale 0.10 \
+    --command_filter_alpha 0.2 \
+    --command_limit_vx=-0.2,0.8 \
+    --command_limit_vy=-0.3,0.3 \
+    --command_limit_yaw=-0.5,0.5 \
+    --num_static_obstacles 0 \
+    --num_dynamic_obstacles 0 \
+    --collision_penalty 0 \
+    --obstacle_clearance_reward_scale 0
+
+Stage 2: resume with easy static obstacles
+
+  python3 scripts/train_sea_nav_isaaclab.py \
+    --resume \
+    --load_run stable_no_obstacles \
+    --checkpoint -1 \
+    --max_iterations 800 \
+    --run_name static_obstacles_easy \
+    --action_scale 0.10 \
+    --command_filter_alpha 0.2 \
+    --command_limit_vx=-0.2,0.8 \
+    --command_limit_vy=-0.3,0.3 \
+    --command_limit_yaw=-0.5,0.5 \
+    --num_static_obstacles 2 \
+    --num_dynamic_obstacles 0 \
+    --collision_penalty -3 \
+    --obstacle_clearance_reward_scale -0.1
+
+Increase difficulty only after playback is stable:
+
+  num_static_obstacles: 2 -> 4 -> 6
+  num_dynamic_obstacles: 0 -> 1 -> 2 -> 3
+  command limits: widen gradually toward the final deployment range
+
+
+3. Play a trained model
+-----------------------
+
+Play the latest checkpoint from a run:
+
+  python3 scripts/play_sea_nav_isaaclab.py \
+    --load_run stable_no_obstacles \
+    --checkpoint -1 \
+    --num_envs 1 \
+    --num_static_obstacles 0 \
+    --num_dynamic_obstacles 0 \
+    --real_time
+
+Play a specific checkpoint by path:
+
+  python3 scripts/play_sea_nav_isaaclab.py \
+    --checkpoint_path logs/sea_nav/Go2_pos_rough/<RUN_NAME>/model_<ITER>.pt \
+    --num_envs 1 \
+    --real_time
+
+Example:
+
+  python3 scripts/play_sea_nav_isaaclab.py \
+    --checkpoint_path logs/sea_nav/Go2_pos_rough/2026-07-08_15-39-29/model_1000.pt \
+    --num_envs 1 \
+    --real_time
+
+
+4. Debug low-level locomotion without PPO
+-----------------------------------------
+
+Hold default joint pose:
+
+  python3 scripts/play_sea_nav_isaaclab.py \
+    --num_envs 1 \
+    --fixed_command 0,0,0 \
+    --hold_default_pose \
+    --num_static_obstacles 0 \
+    --num_dynamic_obstacles 0 \
+    --steps 500 \
+    --debug_interval 50 \
+    --real_time
+
+Send a fixed zero command through the low-level JIT policy:
+
+  python3 scripts/play_sea_nav_isaaclab.py \
+    --num_envs 1 \
+    --fixed_command 0,0,0 \
+    --num_static_obstacles 0 \
+    --num_dynamic_obstacles 0 \
+    --steps 500 \
+    --debug_interval 50 \
+    --real_time
+
+Send a slow forward command:
+
+  python3 scripts/play_sea_nav_isaaclab.py \
+    --num_envs 1 \
+    --fixed_command 0.2,0,0 \
+    --num_static_obstacles 0 \
+    --num_dynamic_obstacles 0 \
+    --steps 500 \
+    --debug_interval 50 \
+    --real_time
+
+
+5. Record a video
+-----------------
+
+Record a video from a checkpoint path:
+
+  python3 scripts/play_sea_nav_isaaclab.py \
+    --checkpoint_path logs/sea_nav/Go2_pos_rough/<RUN_NAME>/model_<ITER>.pt \
+    --num_envs 1 \
+    --video \
+    --video_length 600 \
+    --video_width 960 \
+    --video_height 540 \
+    --real_time
+
+Record the latest checkpoint from a run:
+
+  python3 scripts/play_sea_nav_isaaclab.py \
+    --load_run stable_no_obstacles \
+    --checkpoint -1 \
+    --num_envs 1 \
+    --video \
+    --video_length 600 \
+    --video_width 960 \
+    --video_height 540 \
+    --real_time
+
+By default, videos are written beside the checkpoint under:
+
+  logs/sea_nav/Go2_pos_rough/<RUN_NAME>/videos/play/
+
+To choose a custom output directory:
+
+  python3 scripts/play_sea_nav_isaaclab.py \
+    --checkpoint_path logs/sea_nav/Go2_pos_rough/<RUN_NAME>/model_<ITER>.pt \
+    --num_envs 1 \
+    --video \
+    --video_dir logs/sea_nav/videos \
+    --video_length 600
+
+
+6. Export a trained model to ONNX
+---------------------------------
+
+Export a checkpoint to ONNX:
+
+  python3 scripts/export_onnx.py \
+    --input logs/sea_nav/Go2_pos_rough/<RUN_NAME>/model_<ITER>.pt \
+    --output logs/sea_nav/Go2_pos_rough/<RUN_NAME>/policy.onnx \
+    --dynamic-batch \
+    --verify
+
+Example:
+
+  python3 scripts/export_onnx.py \
+    --input logs/sea_nav/Go2_pos_rough/2026-07-08_15-39-29/model_1000.pt \
+    --output logs/sea_nav/Go2_pos_rough/2026-07-08_15-39-29/policy.onnx \
+    --dynamic-batch \
+    --verify
+
+The exporter infers the SEA-Nav input shape from the checkpoint. For the
+current Go2 navigation policy this is normally:
+
+  observations: [batch, 550]
+  actions:      [batch, 3]
+
+If ONNX verification is skipped because packages are missing, install:
+
+  pip install onnx onnxruntime
+
+
+7. Important notes
+------------------
+
+The low-level locomotion action scale must stay conservative in Isaac Lab:
+
+  action_scale = 0.10
+
+The old value:
+
+  action_scale = 0.25
+
+made the fixed zero-command gait unstable. Any checkpoint trained with the old
+scale should be treated as invalid and retrained from scratch.
+
+If training becomes unstable again:
+
+  1. Test fixed_command 0,0,0.
+  2. Test fixed_command 0.2,0,0.
+  3. Reduce action_scale to 0.05 if needed.
+  4. Narrow command limits.
+  5. Remove obstacles until gait stability returns.

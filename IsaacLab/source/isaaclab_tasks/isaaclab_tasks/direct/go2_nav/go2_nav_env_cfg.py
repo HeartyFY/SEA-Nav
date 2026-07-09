@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 import isaaclab.sim as sim_utils
-from isaaclab.actuators import DCMotorCfg
+from isaaclab.actuators import IdealPDActuatorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
@@ -70,10 +70,9 @@ SEA_NAV_GO2_CFG = ArticulationCfg(
     ),
     soft_joint_pos_limit_factor=0.9,
     actuators={
-        "base_legs": DCMotorCfg(
+        "base_legs": IdealPDActuatorCfg(
             joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
             effort_limit=23.5,
-            saturation_effort=23.5,
             velocity_limit=30.0,
             stiffness=30.0,
             damping=0.75,
@@ -127,7 +126,7 @@ class Go2NavEnvCfg(DirectRLEnvCfg):
     min_ray_distance = 0.1
     max_ray_distance = 5.0
     ray_fov_deg = 180.0
-    action_scale = 0.25
+    action_scale = 0.10
     command_filter_alpha = 0.5
     command_limits = ((-0.5, 2.0), (-1.0, 1.0), (-1.0, 1.0))
     goal_distance_range = (2.0, 5.0)
@@ -148,6 +147,9 @@ class Go2NavEnvCfg(DirectRLEnvCfg):
     obstacle_clearance_reward_scale = -0.35
     collision_penalty = -10.0
     obstacle_debug_vis = False
+    debug_hold_default_pose = False
+    debug_reindex_loco_observations = True
+    debug_reindex_loco_actions = True
 
     lin_vel_obs_scale = 2.0
     ang_vel_obs_scale = 0.25

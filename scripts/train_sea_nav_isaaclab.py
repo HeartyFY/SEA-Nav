@@ -34,6 +34,11 @@ parser.add_argument("--num_static_obstacles", type=int, default=None, help="Over
 parser.add_argument("--num_dynamic_obstacles", type=int, default=None, help="Override dynamic obstacle count per env.")
 parser.add_argument("--obstacle_spawn_radius", type=float, default=None, help="Override obstacle spawn radius in meters.")
 parser.add_argument("--collision_penalty", type=float, default=None, help="Override obstacle collision reward penalty.")
+parser.add_argument("--action_scale", type=float, default=None, help="Override low-level locomotion action scale.")
+parser.add_argument("--command_filter_alpha", type=float, default=None, help="Override high-level command filter alpha.")
+parser.add_argument("--command_limit_vx", type=str, default=None, help='Override vx command range as "min,max".')
+parser.add_argument("--command_limit_vy", type=str, default=None, help='Override vy command range as "min,max".')
+parser.add_argument("--command_limit_yaw", type=str, default=None, help='Override yaw command range as "min,max".')
 parser.add_argument(
     "--obstacle_clearance_reward_scale",
     type=float,
@@ -78,6 +83,15 @@ def _checkpoint_path(log_root: Path, load_run: str | None, checkpoint: int) -> P
     return run_dir / f"model_{checkpoint}.pt"
 
 
+def _parse_range(value: str, name: str) -> tuple[float, float]:
+    parts = [float(part.strip()) for part in value.split(",")]
+    if len(parts) != 2:
+        raise ValueError(f"{name} must be formatted as min,max")
+    if parts[0] >= parts[1]:
+        raise ValueError(f"{name} lower bound must be smaller than upper bound")
+    return parts[0], parts[1]
+
+
 def main() -> None:
     device = args_cli.device if args_cli.device is not None else "cuda:0"
     env_cfg = parse_env_cfg(
@@ -98,6 +112,18 @@ def main() -> None:
         env_cfg.collision_penalty = args_cli.collision_penalty
     if args_cli.obstacle_clearance_reward_scale is not None:
         env_cfg.obstacle_clearance_reward_scale = args_cli.obstacle_clearance_reward_scale
+    if args_cli.action_scale is not None:
+        env_cfg.action_scale = args_cli.action_scale
+    if args_cli.command_filter_alpha is not None:
+        env_cfg.command_filter_alpha = args_cli.command_filter_alpha
+    command_limits = list(env_cfg.command_limits)
+    if args_cli.command_limit_vx is not None:
+        command_limits[0] = _parse_range(args_cli.command_limit_vx, "--command_limit_vx")
+    if args_cli.command_limit_vy is not None:
+        command_limits[1] = _parse_range(args_cli.command_limit_vy, "--command_limit_vy")
+    if args_cli.command_limit_yaw is not None:
+        command_limits[2] = _parse_range(args_cli.command_limit_yaw, "--command_limit_yaw")
+    env_cfg.command_limits = tuple(command_limits)
 
     train_cfg = get_sea_nav_train_cfg(
         max_iterations=args_cli.max_iterations,
